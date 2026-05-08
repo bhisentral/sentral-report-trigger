@@ -41,10 +41,8 @@
   <div class="subtitle">Automated Reports</div>
   <div class="divider"></div>
   <div class="auth-screen active" id="authScreen">
-    <label for="ghToken">GitHub Token</label>
-    <input type="password" id="ghToken" placeholder="ghp_..." autocomplete="off">
     <label for="password">Access Password</label>
-    <input type="password" id="password" placeholder="Enter password">
+    <input type="password" id="password" placeholder="Enter password" autofocus>
     <button class="btn" onclick="authenticate()">Continue</button>
     <div class="status error" id="authError" style="display:none;"></div>
   </div>
@@ -63,15 +61,13 @@
 <script>
   const REPORTS = [
     {
+      id: 'pipeline',
       label: '3P Pipeline Report',
-      repo: 'bhisentral/sentral-pipeline-bot',
-      workflow: 'weekly_pipeline.yml',
       description: 'Weekly BD pipeline update — fetches deals from Termsheet, generates email + PowerPoint deck.',
       note: 'Runs every Tuesday at 3pm PT. Takes ~90 seconds. Sends to the BD distribution list.',
     },
   ];
-  const ACCESS_PASSWORD = 'Pipeline2026!';
-  let ghToken = '';
+  let accessPassword = '';
   function buildSelect() {
     const sel = document.getElementById('reportSelect');
     REPORTS.forEach((r, i) => { const opt = document.createElement('option'); opt.value = i; opt.textContent = r.label; sel.appendChild(opt); });
@@ -86,13 +82,11 @@
     document.getElementById('runInfo').style.display = 'none';
     document.getElementById('triggerBtn').disabled = false;
   }
-  function authenticate() {
-    const tokenVal = document.getElementById('ghToken').value.trim();
+  async function authenticate() {
     const passVal = document.getElementById('password').value;
     const errEl = document.getElementById('authError');
-    if (passVal !== ACCESS_PASSWORD) { errEl.textContent = 'Incorrect password.'; errEl.style.display = 'block'; return; }
-    if (!tokenVal.startsWith('ghp_') && !tokenVal.startsWith('github_pat_')) { errEl.textContent = 'Token should start with ghp_ or github_pat_'; errEl.style.display = 'block'; return; }
-    ghToken = tokenVal;
+    if (!passVal) { errEl.textContent = 'Enter the password.'; errEl.style.display = 'block'; return; }
+    accessPassword = passVal;
     document.getElementById('authScreen').classList.remove('active');
     document.getElementById('triggerScreen').classList.add('active');
     buildSelect();
@@ -108,33 +102,34 @@
     statusEl.style.display = 'block';
     runInfoEl.style.display = 'none';
     try {
-      const res = await fetch('https://api.github.com/repos/' + report.repo + '/actions/workflows/' + report.workflow + '/dispatches', { method: 'POST', headers: { 'Authorization': 'Bearer ' + ghToken, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'main' }) });
-      if (res.status === 204) {
-        statusEl.innerHTML = '<span class="spinner"></span> Triggered — checking status...';
-        await new Promise(r => setTimeout(r, 6000));
-        const runRes = await fetch('https://api.github.com/repos/' + report.repo + '/actions/workflows/' + report.workflow + '/runs?event=workflow_dispatch&per_page=1', { headers: { 'Authorization': 'Bearer ' + ghToken, 'Accept': 'application/vnd.github+json' } });
-        const runData = await runRes.json();
-        const run = runData.workflow_runs?.[0];
-        if (run) {
-          statusEl.className = 'status success';
-          statusEl.innerHTML = '&#x2705; ' + report.label + ' is running. Results will be sent shortly.';
-          runInfoEl.innerHTML = 'Run <strong>#' + run.run_number + '</strong> &nbsp;&middot;&nbsp; Started ' + new Date(run.created_at).toLocaleTimeString() + '<br><a href="' + run.html_url + '" target="_blank">View run on GitHub &rarr;</a>';
-          runInfoEl.style.display = 'block';
-        } else {
-          statusEl.className = 'status success';
-          statusEl.innerHTML = '&#x2705; ' + report.label + ' triggered successfully.';
+      const res = await fetch('/api/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: accessPassword, reportId: report.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 401) {
+          // bad password — kick back to auth
+          document.getElementById('triggerScreen').classList.remove('active');
+          document.getElementById('authScreen').classList.add('active');
+          document.getElementById('authError').textContent = data.error || 'Incorrect password.';
+          document.getElementById('authError').style.display = 'block';
+          accessPassword = '';
+          return;
         }
-        btn.disabled = false;
-      } else if (res.status === 401) {
-        throw new Error('Invalid GitHub token.');
-      } else if (res.status === 404) {
-        throw new Error('Repo or workflow not found. Check token permissions.');
-      } else {
-        throw new Error('GitHub API error: ' + res.status);
+        throw new Error(data.error || ('HTTP ' + res.status));
+      }
+      statusEl.className = 'status success';
+      statusEl.innerHTML = '&#x2705; ' + report.label + ' is running. Results will be sent shortly.';
+      if (data.run) {
+        runInfoEl.innerHTML = 'Run <strong>#' + data.run.number + '</strong> &nbsp;&middot;&nbsp; Started ' + new Date(data.run.started).toLocaleTimeString() + '<br><a href="' + data.run.url + '" target="_blank">View run on GitHub &rarr;</a>';
+        runInfoEl.style.display = 'block';
       }
     } catch (err) {
       statusEl.className = 'status error';
       statusEl.textContent = 'Error: ' + err.message;
+    } finally {
       btn.disabled = false;
     }
   }
