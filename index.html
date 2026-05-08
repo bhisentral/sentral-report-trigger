@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentral — Report Trigger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #282828; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .card { background: #fff; border-radius: 4px; padding: 48px 40px; width: 100%; max-width: 480px; text-align: center; }
+  .logo { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 26px; font-weight: 300; color: #282828; letter-spacing: 6px; text-transform: uppercase; margin-bottom: 8px; }
+  .subtitle { font-size: 12px; color: #AFAA9B; margin-bottom: 32px; letter-spacing: 2px; text-transform: uppercase; }
+  .divider { height: 2px; background: #196E5F; width: 40px; margin: 0 auto 32px; }
+  label { display: block; text-align: left; font-size: 11px; font-weight: 600; color: #282828; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  input[type="password"], select { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 3px; font-size: 14px; margin-bottom: 20px; outline: none; transition: border-color 0.2s; font-family: inherit; background: #fff; color: #282828; appearance: none; -webkit-appearance: none; }
+  .select-wrap { position: relative; margin-bottom: 20px; }
+  .select-wrap select { margin-bottom: 0; padding-right: 36px; cursor: pointer; }
+  .select-wrap::after { content: ''; position: absolute; right: 14px; top: 50%; transform: translateY(-50%); width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #AFAA9B; pointer-events: none; }
+  .report-desc { font-size: 11px; color: #AFAA9B; text-align: left; margin-top: -14px; margin-bottom: 20px; line-height: 1.5; min-height: 16px; }
+  input:focus, select:focus { border-color: #196E5F; }
+  .btn { width: 100%; padding: 13px; background: #196E5F; color: #fff; border: none; border-radius: 3px; font-size: 14px; font-weight: 600; cursor: pointer; letter-spacing: 0.5px; transition: background 0.2s; font-family: inherit; }
+  .btn:hover:not(:disabled) { background: #0F4A40; }
+  .btn:disabled { background: #AFAA9B; cursor: not-allowed; }
+  .status { margin-top: 20px; padding: 12px 16px; border-radius: 3px; font-size: 13px; display: none; text-align: left; line-height: 1.5; }
+  .status.success { background: #e8f5f3; color: #196E5F; border: 1px solid #196E5F; }
+  .status.error { background: #fdf0ef; color: #c0392b; border: 1px solid #F57D73; }
+  .status.running { background: #fafafa; color: #282828; border: 1px solid #ddd; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #AFAA9B; border-top-color: #196E5F; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .note { margin-top: 24px; font-size: 11px; color: #AFAA9B; line-height: 1.7; text-align: left; }
+  .auth-screen, .trigger-screen { display: none; }
+  .auth-screen.active, .trigger-screen.active { display: block; }
+  .run-info { margin-top: 12px; font-size: 12px; color: #555; text-align: left; background: #f5f5f5; border-radius: 3px; padding: 10px 12px; display: none; line-height: 1.6; }
+  .run-info a { color: #196E5F; text-decoration: none; }
+  .run-info a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">SEN+RAL</div>
+  <div class="subtitle">Automated Reports</div>
+  <div class="divider"></div>
+  <div class="auth-screen active" id="authScreen">
+    <label for="ghToken">GitHub Token</label>
+    <input type="password" id="ghToken" placeholder="ghp_..." autocomplete="off">
+    <label for="password">Access Password</label>
+    <input type="password" id="password" placeholder="Enter password">
+    <button class="btn" onclick="authenticate()">Continue</button>
+    <div class="status error" id="authError" style="display:none;"></div>
+  </div>
+  <div class="trigger-screen" id="triggerScreen">
+    <label for="reportSelect">Select Report</label>
+    <div class="select-wrap">
+      <select id="reportSelect" onchange="onReportChange()"></select>
+    </div>
+    <div class="report-desc" id="reportDesc"></div>
+    <button class="btn" id="triggerBtn" onclick="triggerRun()">Run Report</button>
+    <div class="status" id="statusMsg"></div>
+    <div class="run-info" id="runInfo"></div>
+    <div class="note" id="reportNote"></div>
+  </div>
+</div>
+<script>
+  const REPORTS = [
+    {
+      label: '3P Pipeline Report',
+      repo: 'bhisentral/sentral-pipeline-bot',
+      workflow: 'weekly_pipeline.yml',
+      description: 'Weekly BD pipeline update — fetches deals from Termsheet, generates email + PowerPoint deck.',
+      note: 'Runs every Tuesday at 3pm PT. Takes ~90 seconds. Sends to the BD distribution list.',
+    },
+  ];
+  const ACCESS_PASSWORD = 'Pipeline2026!';
+  let ghToken = '';
+  function buildSelect() {
+    const sel = document.getElementById('reportSelect');
+    REPORTS.forEach((r, i) => { const opt = document.createElement('option'); opt.value = i; opt.textContent = r.label; sel.appendChild(opt); });
+    onReportChange();
+  }
+  function onReportChange() {
+    const r = REPORTS[parseInt(document.getElementById('reportSelect').value)];
+    document.getElementById('reportDesc').textContent = r.description;
+    document.getElementById('reportNote').textContent = r.note;
+    document.getElementById('triggerBtn').textContent = 'Run ' + r.label;
+    document.getElementById('statusMsg').style.display = 'none';
+    document.getElementById('runInfo').style.display = 'none';
+    document.getElementById('triggerBtn').disabled = false;
+  }
+  function authenticate() {
+    const tokenVal = document.getElementById('ghToken').value.trim();
+    const passVal = document.getElementById('password').value;
+    const errEl = document.getElementById('authError');
+    if (passVal !== ACCESS_PASSWORD) { errEl.textContent = 'Incorrect password.'; errEl.style.display = 'block'; return; }
+    if (!tokenVal.startsWith('ghp_') && !tokenVal.startsWith('github_pat_')) { errEl.textContent = 'Token should start with ghp_ or github_pat_'; errEl.style.display = 'block'; return; }
+    ghToken = tokenVal;
+    document.getElementById('authScreen').classList.remove('active');
+    document.getElementById('triggerScreen').classList.add('active');
+    buildSelect();
+  }
+  async function triggerRun() {
+    const report = REPORTS[parseInt(document.getElementById('reportSelect').value)];
+    const btn = document.getElementById('triggerBtn');
+    const statusEl = document.getElementById('statusMsg');
+    const runInfoEl = document.getElementById('runInfo');
+    btn.disabled = true;
+    statusEl.className = 'status running';
+    statusEl.innerHTML = '<span class="spinner"></span> Triggering ' + report.label + '...';
+    statusEl.style.display = 'block';
+    runInfoEl.style.display = 'none';
+    try {
+      const res = await fetch('https://api.github.com/repos/' + report.repo + '/actions/workflows/' + report.workflow + '/dispatches', { method: 'POST', headers: { 'Authorization': 'Bearer ' + ghToken, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'main' }) });
+      if (res.status === 204) {
+        statusEl.innerHTML = '<span class="spinner"></span> Triggered — checking status...';
+        await new Promise(r => setTimeout(r, 6000));
+        const runRes = await fetch('https://api.github.com/repos/' + report.repo + '/actions/workflows/' + report.workflow + '/runs?event=workflow_dispatch&per_page=1', { headers: { 'Authorization': 'Bearer ' + ghToken, 'Accept': 'application/vnd.github+json' } });
+        const runData = await runRes.json();
+        const run = runData.workflow_runs?.[0];
+        if (run) {
+          statusEl.className = 'status success';
+          statusEl.innerHTML = '&#x2705; ' + report.label + ' is running. Results will be sent shortly.';
+          runInfoEl.innerHTML = 'Run <strong>#' + run.run_number + '</strong> &nbsp;&middot;&nbsp; Started ' + new Date(run.created_at).toLocaleTimeString() + '<br><a href="' + run.html_url + '" target="_blank">View run on GitHub &rarr;</a>';
+          runInfoEl.style.display = 'block';
+        } else {
+          statusEl.className = 'status success';
+          statusEl.innerHTML = '&#x2705; ' + report.label + ' triggered successfully.';
+        }
+        btn.disabled = false;
+      } else if (res.status === 401) {
+        throw new Error('Invalid GitHub token.');
+      } else if (res.status === 404) {
+        throw new Error('Repo or workflow not found. Check token permissions.');
+      } else {
+        throw new Error('GitHub API error: ' + res.status);
+      }
+    } catch (err) {
+      statusEl.className = 'status error';
+      statusEl.textContent = 'Error: ' + err.message;
+      btn.disabled = false;
+    }
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Enter' && document.getElementById('authScreen').classList.contains('active')) authenticate(); });
+</script>
+</body>
+</html>
